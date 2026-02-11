@@ -658,6 +658,11 @@
                 <button class="btn btn-secondary" onclick="openManageDataModal()">Manage Data</button>
                 <button class="btn btn-secondary" onclick="document.getElementById('csvImport').click()">Import CSV</button>
                 <input type="file" id="csvImport" accept=".csv" style="display: none;" onchange="handleCSVImport(event)">
+                
+                <div style="margin-top: 2rem; padding-top: 2rem; border-top: 1px solid var(--border);">
+                    <button class="btn btn-secondary" onclick="testStorage()">Test Storage</button>
+                    <div id="storageDebug" style="margin-top: 1rem; font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-secondary);"></div>
+                </div>
             </aside>
             
             <main class="content">
@@ -822,9 +827,13 @@
                 const result = await window.storage.get('renovation-quotes');
                 if (result && result.value) {
                     quotes = JSON.parse(result.value);
+                    console.log('Data loaded successfully. Total quotes:', quotes.length);
+                } else {
+                    console.log('No existing data found');
+                    quotes = [];
                 }
             } catch (error) {
-                console.log('No existing data found, starting fresh');
+                console.log('Error loading data (starting fresh):', error);
                 quotes = [];
             }
             updateUI();
@@ -833,10 +842,18 @@
         // Save data to storage
         async function saveData() {
             try {
-                await window.storage.set('renovation-quotes', JSON.stringify(quotes));
+                const result = await window.storage.set('renovation-quotes', JSON.stringify(quotes));
+                if (!result) {
+                    console.error('Storage.set returned null or undefined');
+                    showFlashMessage('Warning: Data may not have saved');
+                    return false;
+                }
+                console.log('Data saved successfully. Total quotes:', quotes.length);
+                return true;
             } catch (error) {
                 console.error('Error saving data:', error);
-                showFlashMessage('Error saving data', 'error');
+                showFlashMessage('Error saving data: ' + error.message);
+                return false;
             }
         }
         
@@ -1169,38 +1186,68 @@
             
             const reader = new FileReader();
             reader.onload = async function(e) {
-                const text = e.target.result;
-                const lines = text.split('\n');
-                const headers = lines[0].split(',').map(h => h.trim());
-                
-                const newQuotes = [];
-                for (let i = 1; i < lines.length; i++) {
-                    if (!lines[i].trim()) continue;
+                try {
+                    const text = e.target.result;
+                    const lines = text.split('\n');
+                    const headers = lines[0].split(',').map(h => h.trim());
                     
-                    const values = lines[i].split(',').map(v => v.trim());
-                    const quote = {
-                        project: values[0],
-                        amount: parseFloat(values[1]),
-                        location: values[2],
-                        zip: values[3],
-                        date: values[4],
-                        contractor: values[5] || '',
-                        notes: values[6] || '',
-                        id: Date.now() + i
-                    };
-                    
-                    if (quote.project && quote.amount && quote.location) {
-                        newQuotes.push(quote);
+                    const newQuotes = [];
+                    for (let i = 1; i < lines.length; i++) {
+                        if (!lines[i].trim()) continue;
+                        
+                        const values = lines[i].split(',').map(v => v.trim());
+                        const quote = {
+                            project: values[0],
+                            amount: parseFloat(values[1]),
+                            location: values[2],
+                            zip: values[3],
+                            date: values[4],
+                            contractor: values[5] || '',
+                            notes: values[6] || '',
+                            id: Date.now() + i + Math.random() * 1000
+                        };
+                        
+                        if (quote.project && quote.amount && quote.location) {
+                            newQuotes.push(quote);
+                        }
                     }
+                    
+                    // Load existing data first
+                    try {
+                        const result = await window.storage.get('renovation-quotes');
+                        if (result && result.value) {
+                            quotes = JSON.parse(result.value);
+                        }
+                    } catch (error) {
+                        console.log('No existing data, starting fresh');
+                        quotes = [];
+                    }
+                    
+                    // Add new quotes
+                    quotes.push(...newQuotes);
+                    
+                    // Save with error handling
+                    try {
+                        const saveResult = await window.storage.set('renovation-quotes', JSON.stringify(quotes));
+                        if (!saveResult) {
+                            throw new Error('Storage returned null');
+                        }
+                        console.log('Data saved successfully:', saveResult);
+                    } catch (saveError) {
+                        console.error('Error saving to storage:', saveError);
+                        showFlashMessage('Error saving data - check console');
+                        return;
+                    }
+                    
+                    updateUI();
+                    showFlashMessage(`Imported ${newQuotes.length} quotes!`);
+                    
+                    // Reset file input
+                    event.target.value = '';
+                } catch (error) {
+                    console.error('Import error:', error);
+                    showFlashMessage('Error importing CSV - check format');
                 }
-                
-                quotes.push(...newQuotes);
-                await saveData();
-                updateUI();
-                showFlashMessage(`Imported ${newQuotes.length} quotes!`);
-                
-                // Reset file input
-                event.target.value = '';
             };
             reader.readAsText(file);
         }
@@ -1236,6 +1283,49 @@
             a.click();
             window.URL.revokeObjectURL(url);
             showFlashMessage('Data exported!');
+        }
+        
+        // Test storage functionality
+        async function testStorage() {
+            const debug = document.getElementById('storageDebug');
+            let output = '=== Storage Test ===\n';
+            
+            try {
+                // Check if storage API exists
+                if (!window.storage) {
+                    output += '❌ window.storage not available\n';
+                    output += 'This app needs to run in claude.ai\n';
+                    debug.textContent = output;
+                    return;
+                }
+                
+                output += '✅ window.storage exists\n';
+                
+                // Test write
+                const testData = { test: 'data', timestamp: Date.now() };
+                const writeResult = await window.storage.set('test-key', JSON.stringify(testData));
+                output += writeResult ? '✅ Write test passed\n' : '❌ Write test failed\n';
+                
+                // Test read
+                const readResult = await window.storage.get('test-key');
+                output += readResult ? '✅ Read test passed\n' : '❌ Read test failed\n';
+                
+                // Check main data
+                const mainData = await window.storage.get('renovation-quotes');
+                if (mainData && mainData.value) {
+                    const parsed = JSON.parse(mainData.value);
+                    output += `✅ Main data exists: ${parsed.length} quotes\n`;
+                } else {
+                    output += '⚠️ No main data found\n';
+                }
+                
+                output += `\nMemory: ${quotes.length} quotes loaded\n`;
+                
+            } catch (error) {
+                output += `❌ Error: ${error.message}\n`;
+            }
+            
+            debug.textContent = output;
         }
         
         // Close modals when clicking outside
