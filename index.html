@@ -656,6 +656,8 @@
                 
                 <button class="btn" onclick="openAddQuoteModal()">+ Add Quote</button>
                 <button class="btn btn-secondary" onclick="openManageDataModal()">Manage Data</button>
+                <button class="btn btn-secondary" onclick="document.getElementById('csvImport').click()">Import CSV</button>
+                <input type="file" id="csvImport" accept=".csv" style="display: none;" onchange="handleCSVImport(event)">
             </aside>
             
             <main class="content">
@@ -732,6 +734,9 @@
             <div class="modal-header">
                 <h2 class="modal-title">Manage Data</h2>
                 <div class="close-btn" onclick="closeManageDataModal()">×</div>
+            </div>
+            <div style="margin-bottom: 1.5rem;">
+                <button class="btn" onclick="exportToCSV()">📥 Export to CSV</button>
             </div>
             <div class="data-table">
                 <table>
@@ -1155,6 +1160,82 @@
             flash.textContent = message;
             document.body.appendChild(flash);
             setTimeout(() => flash.remove(), 3000);
+        }
+        
+        // Handle CSV import
+        async function handleCSVImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const text = e.target.result;
+                const lines = text.split('\n');
+                const headers = lines[0].split(',').map(h => h.trim());
+                
+                const newQuotes = [];
+                for (let i = 1; i < lines.length; i++) {
+                    if (!lines[i].trim()) continue;
+                    
+                    const values = lines[i].split(',').map(v => v.trim());
+                    const quote = {
+                        project: values[0],
+                        amount: parseFloat(values[1]),
+                        location: values[2],
+                        zip: values[3],
+                        date: values[4],
+                        contractor: values[5] || '',
+                        notes: values[6] || '',
+                        id: Date.now() + i
+                    };
+                    
+                    if (quote.project && quote.amount && quote.location) {
+                        newQuotes.push(quote);
+                    }
+                }
+                
+                quotes.push(...newQuotes);
+                await saveData();
+                updateUI();
+                showFlashMessage(`Imported ${newQuotes.length} quotes!`);
+                
+                // Reset file input
+                event.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+        
+        // Export data to CSV
+        function exportToCSV() {
+            if (quotes.length === 0) {
+                showFlashMessage('No data to export');
+                return;
+            }
+            
+            const headers = ['Project', 'Amount', 'Location', 'ZIP', 'Date', 'Contractor', 'Notes'];
+            const rows = quotes.map(q => [
+                q.project,
+                q.amount,
+                q.location,
+                q.zip,
+                q.date,
+                q.contractor || '',
+                q.notes || ''
+            ]);
+            
+            const csv = [
+                headers.join(','),
+                ...rows.map(row => row.join(','))
+            ].join('\n');
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `renovation-quotes-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+            showFlashMessage('Data exported!');
         }
         
         // Close modals when clicking outside
